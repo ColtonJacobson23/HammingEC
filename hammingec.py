@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
 '''
 First attempt at using EC for creating "best alignments" between two protein sequences
 Should also apply to other sequence types
@@ -5,6 +7,9 @@ Notes regarding this EC and it's configuration
 1. Representation
  - Sequences for any biological information encoding will be done with strings
  - One sequence will be a Target sequence while the rest will be variations of another sequence
+ - One thing to consider is maybe representing the sequence (atleast for proteins) not as the total
+   protein sequence but rather just where spaces go and how long they are, then you only have to
+   deal with spaces as maybe a dictionary for location and number. 
 2. Fitness function
 - It will use the hamming distance calculation (for now, possible implementations of dot matrix are in the works)
 - Fitness will be the score of the hamming calculation against the Target sequence
@@ -19,111 +24,55 @@ Notes regarding this EC and it's configuration
 - One key feature of optimization will be a target hamming distance
 - The user can set the target hamming distance to whatever percent difference they want the program to meet
 '''
-#!/usr/bin/python3
-# -*- coding: utf-8 -*-
 
 # %%
 import random
 from typing import TypedDict
+from typing import Optional
+import copy
 import math
-import json
+from collections import Counter
 import string
 
-# DO NOT MODIFY >>>>
-# First, what should our representation look like?
-# Is there any modularity in adjacency?
-# What mechanisms capitalize on such modular patterns?
-# ./corpus/2_count.py specificies this same structure
-# Positions    01234   56789   01234
-LEFT_DVORAK = "',.PY" "AOEUI" ";QJKX"
-LEFT_QWERTY = "QWERT" "ASDFG" "ZXCVB"
-LEFT_COLEMK = "QWFPG" "ARSTD" "ZXCVB"
-LEFT_WORKMN = "QDRWB" "ASHTG" "ZXMCV"
 
-LEFT_DISTAN = "11111" "00001" "11111"
-LEFT_ERGONO = "00001" "00001" "11212"
-LEFT_EDGE_B = "01234" "01234" "01234"
-
-# Positions     56   7890123   456789   01234
-RIGHT_DVORAK = "[]" "FGCRL/=" "DHTNS-" "BMWVZ"
-RIGHT_QWERTY = "-=" "YUIOP[]" "HJKL;'" "NM,./"
-RIGHT_COLEMK = "-=" "JLUY;[]" "HNEIO'" "KM,./"
-RIGHT_WOKRMN = "-=" "JFUP;[]" "YNEOI'" "KL,./"
-
-RIGHT_DISTAN = "23" "1111112" "100000" "11111"
-RIGHT_ERGONO = "22" "2000023" "100001" "10111"
-RIGHT_EDGE_B = "10" "6543210" "543210" "43210"
-
-DVORAK = LEFT_DVORAK + RIGHT_DVORAK
-QWERTY = LEFT_QWERTY + RIGHT_QWERTY
-COLEMAK = LEFT_COLEMK + RIGHT_COLEMK
-WORKMAN = LEFT_WORKMN + RIGHT_WOKRMN
-
-DISTANCE = LEFT_DISTAN + RIGHT_DISTAN
-ERGONOMICS = LEFT_ERGONO + RIGHT_ERGONO
-PREFER_EDGES = LEFT_EDGE_B + RIGHT_EDGE_B
-
-# Real data on w.p.m. for each letter, normalized.
-# Higher values is better (higher w.p.m.)
-with open(file="typing_data/manual-typing-data_qwerty.json", mode="r") as f:
-    data_qwerty = json.load(fp=f)
-with open(file="typing_data/manual-typing-data_dvorak.json", mode="r") as f:
-    data_dvorak = json.load(fp=f)
-data_values = list(data_qwerty.values()) + list(data_dvorak.values())
-mean_value = sum(data_values) / len(data_values)
-data_combine = []
-for dv, qw in zip(DVORAK, QWERTY):
-    if dv in data_dvorak.keys() and qw in data_qwerty.keys():
-        data_combine.append((data_dvorak[dv] + data_qwerty[qw]) / 2)
-    if dv in data_dvorak.keys() and qw not in data_qwerty.keys():
-        data_combine.append(data_dvorak[dv])
-    if dv not in data_dvorak.keys() and qw in data_qwerty.keys():
-        data_combine.append(data_qwerty[qw])
-    else:
-        # Fill missing data with the mean
-        data_combine.append(mean_value)
+nums = []
+for x in range(-100, 101):
+    nums.append(str(x))
 
 
 class Individual(TypedDict):
-    genome: str
-    fitness: int
+    """Type of each individual to evolve"""
+
+    genome: string
+    fitness: float
 
 
 Population = list[Individual]
 
 
-def print_keyboard(individual: Individual) -> None:
-    layout = individual["genome"]
-    fitness = individual["fitness"]
-    """Prints the keyboard in a nice way"""
-    print("______________  ________________")
-    print(" ` 1 2 3 4 5 6  7 8 9 0 " + " ".join(layout[15:17]) + " Back")
-    print("Tab " + " ".join(layout[0:5]) + "  " + " ".join(layout[17:24]) + " \\")
-    print("Caps " + " ".join(layout[5:10]) + "  " + " ".join(layout[24:30]) + " Enter")
-    print(
-        "Shift " + " ".join(layout[10:15]) + "  " + " ".join(layout[30:35]) + " Shift"
-    )
-    print(f"\nAbove keyboard has fitness of: {fitness}")
+def gen_rand_seq(len: int) -> str:
+    return ""
 
 
-# <<<< DO NOT MODIFY
-
-
-def initialize_individual(genome: str, fitness: int) -> Individual:
+'''
+With creating a new individual, the issue becomes, do you
+take the given genome and add random spaces now, or do you 
+let mutation and recombination do that after?
+'''
+def initialize_individual(genome: str, fitness: float) -> Individual:
     """
     Purpose:        Create one individual
-    Parameters:     genome as string, fitness as integer (higher better)
+    Parameters:     genome as Node, fitness as integer (lower = better)
     User Input:     no
     Prints:         no
-    Returns:        One Individual, as a dict[str, int]
+    Returns:        One Individual, as a dict[Node, int]
     Modifies:       Nothing
-    Calls:          ?
-    Example doctest:
+    Calls:          Basic python only
     """
     return {"genome": genome, "fitness": fitness}
 
 
-def initialize_pop(example_genome: str, pop_size: int) -> Population:
+def initialize_pop(pop_size: int, io_data: IOdata) -> Population:
     """
     Purpose:        Create population to evolve
     Parameters:     Goal string, population size as int
@@ -131,16 +80,15 @@ def initialize_pop(example_genome: str, pop_size: int) -> Population:
     Prints:         no
     Returns:        a population, as a list of Individuals
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          random.choice-1, string.ascii_letters-1, initialize_individual-n
     Example doctest:
     """
-    myChars = list(DVORAK)
-    testChars = myChars
     population: Population = []
     for x in range (pop_size):
-        random.shuffle(testChars)
-        new_gen = "".join(testChars)
-        individual = initialize_individual(genome=new_gen, fitness=0)
+        individual = initialize_individual(
+            genome=gen_rand_seq(), 
+            fitness=0
+            )
         population.append(individual)
     return population
 
@@ -153,31 +101,75 @@ def recombine_pair(parent1: Individual, parent2: Individual) -> Population:
     Prints:         no
     Returns:        A population of size 2, the children
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python, random.choice-1, initialize_individual-2
     Example doctest:
     """
-    index = random.choice(range(len(parent1["genome"])))
-    #gen1 = list(parent1["genome"])
-    #gen2 = list(parent2["genome"])
+    nlist1 = []
+    nlist2 = []
+    rand_node1 = []
+    rand_node2 = []
+
+    make_stack(parent1["genome"], nlist1)
+    make_stack(parent2["genome"], nlist2)
+    select_rand_node(parent1["genome"], rand_node1)
+    select_rand_node(parent2["genome"], rand_node2, tree_depth(rand_node1[0][0]))
+    new_subtree1 = []
+    make_stack(rand_node1[0][0], new_subtree1)
+    new_subtree2 = []
+    make_stack(rand_node2[0][0], new_subtree2)
+    rand_index1 = rand_node1[0][1]-1
+    rand_index2 = rand_node2[0][1]-1
+
+
+    orig1 = nlist1[:rand_index1]
+    change1 = nlist1[rand_index1:]
+    depth1 = 1
+    count1 = 0
+    x = change1[count1]
+    while(x not in nums):
+        x = change1[count1]
+        depth1 += 1
+        count1 += 1
+    finished_tree1 = orig1 + new_subtree2
+    p1 = change1[len(new_subtree1):]
+    finished_tree1 = finished_tree1 + p1
+    ch1 = " ".join(finished_tree1)
+
+    orig2 = nlist2[:rand_index2]
+    change2 = nlist2[rand_index2:]
+    depth2 = 1
+    count2 = 0
+    x = change2[count2]
+    while(x not in nums):
+        x = change2[count2]
+        depth2 += 1
+        count2 += 1
+    finished_tree2 = orig2 + new_subtree1
+    p2 = change2[len(new_subtree2):]
+    finished_tree2 = finished_tree2 + p2
+    ch2 = " ".join(finished_tree2)
+
+
+
+    if ch1.count("x") == 0:
+        put_an_x_in_it(ch1)
+    elif ch1.count("x") == 2:
+        ind = ch1.find("x")
+        ch1 = list(ch1)
+        ch1[ind] = str(random.randint(-100, 100))
+        ch1 = "".join(ch1)
+
+    if ch2.count("x") == 0:
+        put_an_x_in_it(ch2)
+    elif ch2.count("x") == 2:
+        ind = ch2.find("x")
+        ch2 = list(ch2)
+        ch2[ind] = str(random.randint(-100, 100))
+        ch2 = "".join(ch2)
     
-    if index > len(parent1["genome"]) / 2:
-        new_gen1 = parent1["genome"][:index]
-        new_gen2 = parent2["genome"][:index]
-    else:
-        new_gen1 = parent1["genome"][index:]
-        new_gen2 = parent2["genome"][index:]
+    child1 = initialize_individual(ch1, 0)
+    child2 = initialize_individual(ch2, 0)
 
-    for x in range(len(parent1["genome"])):
-        if parent1["genome"][x] not in new_gen2:
-            new_gen2 += parent1["genome"][x]
-        if parent2["genome"][x] not in new_gen1:
-            new_gen1 += parent2["genome"][x]
-        
-
-    #new_genome1 = "".join(gen3)
-    #new_genome2 = "".join(gen4)
-    child1 = initialize_individual(genome=new_gen1, fitness=0)
-    child2 = initialize_individual(genome=new_gen2, fitness=0)
     return [child1, child2]
 
 
@@ -191,18 +183,22 @@ def recombine_group(parents: Population, recombine_rate: float) -> Population:
     Prints:         no
     Returns:        New population of children
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python, random.random~n/2, recombine pair-n
     """
     combination: Population = []
     for ipair in range(0, len(parents) - 1, 2):
         if random.random() < recombine_rate:
-            child1, child2 = recombine_pair(
-                parent1=parents[ipair], parent2=parents[ipair + 1]
-            )
+            try:
+                child1, child2 = recombine_pair(
+                    parent1=parents[ipair], parent2=parents[ipair + 1]
+                )
+            except:
+                child1, child2 = parents[ipair], parents[ipair + 1]
         else:
             child1, child2 = parents[ipair], parents[ipair + 1]
         combination.extend([child1, child2])
     return combination 
+
 
 def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
     """
@@ -212,24 +208,30 @@ def mutate_individual(parent: Individual, mutate_rate: float) -> Individual:
     Prints:         no
     Returns:        One Individual, as a TypedDict[str, int]
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python, random,choice-1,
     Example doctest:
     """
-    new_genome = parent["genome"].split()
-    for ch in new_genome:
-        if random.random() < mutate_rate:
-            temp = random.choice(new_genome)
-            tempInd = new_genome.index(ch)
-            tempInd2 = new_genome.index(temp)
-            new_genome[tempInd] = temp
-            new_genome[tempInd2] = ch
-
-    gen_str = ""
-    for ch in parent["genome"]:
-        gen_str = gen_str + ch
-    mutant = initialize_individual(genome=gen_str, fitness=0)
-    return mutant
-
+    if random.random() < mutate_rate:
+        nlist = []
+        make_stack(parent["genome"], nlist)
+        rand_index = random.randint(0, len(nlist) - 1)
+        orig = nlist[:rand_index]
+        change = nlist[rand_index:]
+        depth = 1
+        count = 0
+        x = change[count]
+        while(x not in nums):
+            depth += 1
+            count += 1
+            x = change[count]
+        new_subtree = gen_rand_prefix_code(depth).split(" ")
+        finished_tree = orig + new_subtree
+        p2 = change[len(new_subtree):]
+        finished_tree = finished_tree + p2
+        mutant = initialize_individual(" ".join(finished_tree), 0)
+        return mutant
+    return parent
+        
 
 def mutate_group(children: Population, mutate_rate: float) -> Population:
     """
@@ -239,77 +241,63 @@ def mutate_group(children: Population, mutate_rate: float) -> Population:
     Prints:         no
     Returns:        One Individual, as a TypedDict[str, int]
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python, mutate_individual-n
     Example doctest:
     """
     new_group: Population = []
     for child in children:
-        new_group.append(mutate_individual(parent=child, mutate_rate=mutate_rate))
+        try:
+            new_group.append(mutate_individual(parent=child, mutate_rate=mutate_rate))
+        except:
+            new_group.append(child)
     return new_group
 
 
 # DO NOT MODIFY >>>>
-def evaluate_individual(individual: Individual) -> None:
+def evaluate_individual(individual: Individual, io_data: IOdata) -> None:
     """
     Purpose:        Computes and modifies the fitness for one individual
-                    Assumes and relies on the logc of ./corpus/2_counts.py
-    Parameters:     One Individual
+    Parameters:     One Individual, data formatted as IOdata
     User Input:     no
     Prints:         no
     Returns:        None
     Modifies:       The individual (mutable object)
     Calls:          Basic python only
+    Notes:          train/test format is like PSB2 (see IOdata above)
     Example doctest:
+    >>> evaluate_individual(ind1, io_data)
     """
-    layout = individual["genome"]
-
-    # Basic return to home row, with no extra cost for repeats.
     fitness = 0
-    for key in layout:
-        fitness += count_dict[key] * int(DISTANCE[layout.find(key)])
+    errors = []
+    for sub_eval in io_data:
+        eval_string = parse_tree_return(individual["genome"]).replace(
+            "x", str(sub_eval["input1"])
+        )
 
-    # Vowels on the left, Consosants on the right
-    for pos, key in enumerate(layout):
-        if key in "AEIOUY" and pos > 14:
-            fitness += 1
+        # In clojure, this is really slow with subprocess
+        # eval_string = "( float " + eval_string + ")"
+        # returnobject = subprocess.run(
+        #     ["clojure", "-e", eval_string], capture_output=True
+        # )
+        # result = float(returnobject.stdout.decode().strip())
 
-    # Top-down guess at ideal ergonomics
-    for key in layout:
-        fitness += count_dict[key] * int(ERGONOMICS[layout.find(key)])
+        # In python, this is MUCH MUCH faster:
+        try:
+            y = eval(prefix_to_infix(eval_string))
+        except ZeroDivisionError:
+            y = math.inf
 
-    # [] {} () <> should be adjacent.
-    # () ar fixed by design choice (number line).
-    # [] and {} are on same keys.
-    # Perhaps ideally, <> and () should be on same keys too...
-    right_edges = [4, 9, 14, 16, 23, 29, 34]
-    for pos, key in enumerate(layout):
-        # order of (x or y) protects index on far right:
-        if key == "[" and (pos in right_edges or "]" != layout[pos + 1]):
-            fitness += 1
-        if key == "," and (pos in right_edges or "." != layout[pos + 1]):
-            fitness += 1
-
-    # Symbols should be toward edges.
-    for pos, key in enumerate(layout):
-        if key in "-[],.';/=":
-            fitness += int(PREFER_EDGES[pos])
-
-    # Keybr.com querty-dvorak average data as estimate of real hand
-    for pos, key in enumerate(layout):
-        fitness += count_dict[key] / data_combine[pos]
-
-    # Shortcut characters (skip this one).
-    # On right hand for keyboarders (left ctrl is usually used)
-    # On left hand for mousers (for one-handed shortcuts).
-    pass
-
+        errors.append(abs(sub_eval["output1"] - y))
+    # Higher errors is bad, and longer strings is bad
+    fitness = sum(errors) + len(eval_string.split())
+    # Higher fitness is worse
     individual["fitness"] = fitness
 
 
 # <<<< DO NOT MODIFY
 
 
-def evaluate_group(individuals: Population) -> None:
+def evaluate_group(individuals: Population, io_data: IOdata) -> None:
     """
     Purpose:        Computes and modifies the fitness for population
     Parameters:     Objective string, Population
@@ -317,11 +305,11 @@ def evaluate_group(individuals: Population) -> None:
     Prints:         no
     Returns:        None
     Modifies:       The Individuals, all mutable objects
-    Calls:          ?
+    Calls:          Basic python, evaluate_individual-n
     Example doctest:
     """
     for i in range(len(individuals)):
-        evaluate_individual(individual=individuals[i])
+        evaluate_individual(individual=individuals[i], io_data=io_data)
 
 
 def rank_group(individuals: Population) -> None:
@@ -332,7 +320,7 @@ def rank_group(individuals: Population) -> None:
     Prints:         no
     Returns:        None
     Modifies:       The population's order (a mutable object)
-    Calls:          ?
+    Calls:          Basic python only
     Example doctest:
     """
     individuals.sort(key=lambda ind: ind["fitness"], reverse=False)
@@ -346,16 +334,21 @@ def parent_select(individuals: Population, number: int) -> Population:
     Prints:         no
     Returns:        Sub-population
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python, random.choices-1
     Example doctest:
     """
     parents: Population = []
-    fitnesses = [i["fitness"] for i in individuals]
-    parents = random.choices(individuals, fitnesses, k=number)
+    indiv = []
+    while individuals:
+        x = individuals.pop()
+        if x["fitness"] != math.inf:
+            indiv.append(x)
+    fitnesses = [i["fitness"] for i in indiv]
+    parents = random.choices(indiv, fitnesses, k=number)
     return parents
 
 
-def survivor_select(individuals: Population, pop_size: int) -> Population:
+def survivor_select(individuals: Population, pop_size: int, io_data: IOdata) -> Population:
     """
     Purpose:        Picks who gets to live!
     Parameters:     Population, and population size to return.
@@ -363,17 +356,16 @@ def survivor_select(individuals: Population, pop_size: int) -> Population:
     Prints:         no
     Returns:        Population, of pop_size
     Modifies:       Nothing
-    Calls:          ?
+    Calls:          Basic python only
     Example doctest:
     """
-    new_pop = initialize_pop(DVORAK, pop_size)
-    evaluate_group(new_pop)
+    new_pop = initialize_pop(int(pop_size/2), io_data)
+    evaluate_group(new_pop, io_data)
     return individuals[:int(pop_size/2)] + new_pop
-    #return individuals[:pop_size]
-    
+    # return individuals[:pop_size]
 
 
-def evolve(example_genome: str) -> Population:
+def evolve(io_data: IOdata, pop_size: int = 1000) -> Population:
     """
     Purpose:        A whole EC run, main driver
     Parameters:     The evolved population of solutions
@@ -389,37 +381,34 @@ def evolve(example_genome: str) -> Population:
     # Type 's' to 'step' deeper
     # Type 'n' to 'next' over
     # Type 'f' or 'r' to finish/return a function call and go back to caller
-    pop_size: int = 15000
-    population = initialize_pop(example_genome, pop_size) 
-    evaluate_group(population) 
+    # pop_size: int = 100
+    print("Starting to evolve-----------------------------------------------------------------------")
+    population = initialize_pop(pop_size, io_data) 
+    evaluate_group(population, io_data) 
     rank_group(population) 
     best_fitness = population[0]['fitness'] 
-    perfect_fitness = len(example_genome) 
+    perfect_fitness = 1
     counter = 0
-    while best_fitness > 20:
+    while best_fitness > 300:
         counter += 1 
         parents = parent_select(individuals=population, number=pop_size) 
-        children = recombine_group(parents=parents, recombine_rate=0.9) 
-        mutate_rate = (1 - best_fitness / perfect_fitness) / 5 
+        # for x in parents:
+        #     if tree_depth(x["genome"]) != 4:
+        #         x = initialize_individual(genome=gen_rand_prefix_code(4), fitness=0)
+        children = recombine_group(parents=parents, recombine_rate=0.7) 
+        # mutate_rate = (1 - best_fitness / perfect_fitness) / 5 
         mutants = mutate_group(children=children, mutate_rate=0.7) 
-        evaluate_group(individuals=mutants) 
+        evaluate_group(individuals=mutants, io_data=io_data) 
         everyone = population + mutants 
         rank_group(individuals=everyone) 
-        population = survivor_select(individuals=everyone, pop_size=pop_size)
+        population = survivor_select(individuals=everyone, pop_size=pop_size, io_data=io_data)
         #if best_fitness != population[0]['fitness']:
         best_fitness = population[0]['fitness'] 
-        print('Iteration number', counter, 'with best individual', population[0])
+        print('Iteration number', counter, 'with best individual', population[0], "of depth", tree_depth(population[0]["genome"]))
 
 
     return population
 
-
-# Seed for base grade.
-# For the exploratory competition points (last 10),
-# comment this one line out if you want, but put it back please.
-seed = True
-
-# DO NOT MODIFY >>>>
 if __name__ == "__main__":
     divider = "===================================================="
     # Execute doctests to protect main:
@@ -427,85 +416,34 @@ if __name__ == "__main__":
 
     # doctest.testmod()
     # doctest.testmod(verbose=True)
-
-    if seed:
-        random.seed(42)
-
-    with open("corpus/counts.json") as fhand:
-        count_dict = json.load(fhand)
-
-    # print("Counts of characters in big corpus, ordered by freqency:")
-    # ordered = sorted(count_dict, key=count_dict.__getitem__, reverse=True)
-    # for key in ordered:
-    #     print(key, count_dict[key])
+    random.seed(42)
 
     print(divider)
-    print(
-        f"Number of possible permutations of standard keyboard: {math.factorial(len(DVORAK)):,e}"
-    )
-    print("That's a huge space to search through")
-    print("The messy landscape is a difficult to optimize multi-modal space")
+    print("Number of possible genetic programs: infinite...")
     print("Lower fitness is better.")
-
     print(divider)
-    print("\nThis is the Dvorak keyboard:")
-    dvorak = Individual(genome=DVORAK, fitness=0)
-    evaluate_individual(dvorak)
-    print_keyboard(dvorak)
 
-    print(divider)
-    print("\nThis is the Workman keyboard:")
-    workman = Individual(genome=WORKMAN, fitness=0)
-    evaluate_individual(workman)
-    print_keyboard(workman)
+    X = list(range(-10, 110, 10))
+    Y = [(x * (9 / 5)) + 32 for x in X]
+    # data = [{"input1": x, "output1": y} for x, y in zip(X, Y)]
+    # mypy wanted this:
+    data = [initialize_data(input1=x, output1=y) for x, y in zip(X, Y)]
 
-    print(divider)
-    print("\nThis is the Colemak keyboard:")
-    colemak = Individual(genome=COLEMAK, fitness=0)
-    evaluate_individual(colemak)
-    print_keyboard(colemak)
+    # Correct:
+    print("Example of celcius to farenheight:")
+    ind1 = initialize_individual("( + ( * x ( / 9 5 ) ) 32 )", 0)
+    evaluate_individual(ind1, data)
+    print_tree(ind1["genome"])
+    print("Fitness", ind1["fitness"])
 
-    print(divider)
-    print("\nThis is the QWERTY keyboard:")
-    qwerty = Individual(genome=QWERTY, fitness=0)
-    evaluate_individual(qwerty)
-    print_keyboard(qwerty)
+    # Yours
+    train = data[: int(len(data) / 2)]
+    test = data[int(len(data) / 2) :]
+    population = evolve(train)
+    evaluate_individual(population[0], test)
+    population[0]["fitness"]
 
-    print(divider)
-    print("\nThis is a random layout:")
-    badarr = list(DVORAK)
-    random.shuffle(badarr)
-    badstr = "".join(badarr)
-    badkey = Individual(genome=badstr, fitness=0)
-    evaluate_individual(badkey)
-    print_keyboard(badkey)
-
-    print(divider)
-    input("Press any key to start")
-    population = evolve(example_genome=DVORAK)
-
-    print("Here is the best layout:")
-    print_keyboard(population[0])
-
-    grade = 0
-    if qwerty["fitness"] < population[0]["fitness"]:
-        grade = 0
-    if colemak["fitness"] < population[0]["fitness"]:
-        grade = 50
-    if workman["fitness"] < population[0]["fitness"]:
-        grade = 60
-    elif dvorak["fitness"] < population[0]["fitness"]:
-        grade = 70
-    else:
-        grade = 80
-
-    with open(file="results.txt", mode="w") as f:
-        f.write(str(grade))
-
-    with open(file="best_ever.txt", mode="r") as f:
-        past_record = f.readlines()[1]
-    if population[0]["fitness"] < float(past_record):
-        with open(file="best_ever.txt", mode="w") as f:
-            f.write(population[0]["genome"] + "\n")
-            f.write(str(population[0]["fitness"]))
-# <<<< DO NOT MODIFY
+    print("Here is the best program:")
+    parse_tree_print(population[0]["genome"])
+    print("And it's fitness:")
+    print(population[0]["fitness"])
